@@ -4,20 +4,35 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 import json
+
+from google.protobuf import text_format
+
 import decrypt
-import deffHell
 import base64
+from diffiehellman import diffiehellman as dh
 from authtoken import AuthToken
 from connection import Connection
 from mercury import MercuryManager
 from parameter import *
 from session import Session
 
+# patch DH with non RFC prime to be used for handshake
+if not 1 in dh.PRIMES:
+  dh.PRIMES.update( { 1: {
+      "prime": 0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a63a3620ffffffffffffffff,
+      "generator": 2
+  } } )
 
 class Server(BaseHTTPRequestHandler):
+    '''
     dh = deffHell.DiffieHellman(group=1)
     privateKey = dh.get_private_key()
     publicKey = dh.gen_public_key()
+    '''
+    keys = dh.DiffieHellman(group=1, key_length=KEY_LENGTH)
+    keys.generate_private_key()
+    keys.generate_public_key()
+    publicKey = keys.public_key
 
     def _set_200_headers(self, keyword, value):
         self.send_response(200)
@@ -76,6 +91,7 @@ class Server(BaseHTTPRequestHandler):
         user_name = var['userName'][0].encode()
         blob = var['blob'][0].encode()
         client_key = var['clientKey'][0].encode()
+        device_name = var['deviceName'][0]
 
         response = json.dumps(
             {
@@ -87,13 +103,15 @@ class Server(BaseHTTPRequestHandler):
         self._set_200_headers('Content-Length', str(len(response)))
         self.wfile.write(response)
 
-        blob_dec = decrypt.getBlobFromAuth(Server.dh, blob, client_key)
+        blob_dec = decrypt.getBlobFromAuth(Server.keys, blob, client_key)
         login = decrypt.decryptBlob(blob_dec, user_name, DEVICE_ID)
-        #typeInt, authData = decrypt.decryptBlob(blob_dec, userName, DEVICE_ID)
+
+        with open('credentials/' + device_name + '.dat', 'w') as f:
+            f.write(text_format.MessageToString(login))
+            f.close()
 
         connection = Connection()
         session = Session().connect(connection)
-        #reusable_token = session.authenticate(bytes(userName), bytes(authData), Authentication.AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS)
         reusable_token = session.authenticate(login)
         print("Token: ", reusable_token)
         manager = MercuryManager(connection)
@@ -101,12 +119,6 @@ class Server(BaseHTTPRequestHandler):
         print("AuthToken: ", authToken)
         manager.terminate()
 
-
-        #b64_authData = base64.standard_b64encode(authData)
-        #print("b64_auth: ", b64_authData)
-        #print("b64_auth_hex: ", b64_authData.hex())
-
-        #print("auth_data: ", authData.hex())
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):

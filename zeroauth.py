@@ -37,7 +37,7 @@ class Zeroauth:
         self.zeroconf = Zeroconf()
 
     def start(self):
-        self.server = webserver.startThread(self.port)
+        self.server = webserver.start_thread(self.port)
         self.zeroconf.register_service(self.info)
 
     def stop(self):
