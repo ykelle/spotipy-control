@@ -10,4 +10,4 @@ setup(
     py_modules=['spotipy-control'],
     license='MIT',
     zip_safe=False,
-    install_requires=['requests,pycryptodome,diffiehellman,pyaes,protobuf'])
+    install_requires=['requests','pycryptodome','diffiehellman','pyaes','protobuf'])
