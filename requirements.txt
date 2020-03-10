@@ -1,3 +1,4 @@
+google
 requests
 -e git+https://github.com/jstasiak/python-zeroconf.git#egg=python-zeroconf
 pycryptodome

@@ -1,17 +1,15 @@
 import random
 import socket
-from time import sleep
-import webserver
 from zeroconf import Zeroconf, ServiceInfo
-from parameter import REMOTE_NAME
+from parameter import REMOTE_NAME_DEFAULT
+from webserver import HTTPServerController
 
 
 class Zeroauth:
-
     MAX_PORT = 65536
     MIN_PORT = 1024
 
-    def __init__(self, deviceName = REMOTE_NAME):
+    def __init__(self, deviceName=REMOTE_NAME_DEFAULT):
         self.hostname = socket.gethostname()
         try:
             self.ip = ip = socket.gethostbyname(self.hostname)
@@ -31,30 +29,19 @@ class Zeroauth:
             addresses=[socket.inet_aton(self.ip)],
             port=self.port,
             properties=self.desc,
-            #server=self.hostname,
+            # server=self.hostname,
         )
 
         self.zeroconf = Zeroconf()
+        self.server = HTTPServerController(self.port)
+        # self.register_status_listener = receiver_controller.register_status_listener
+        self.register_listener = self.server.register_listener
 
     def start(self):
-        self.server = webserver.start_thread(self.port)
+        self.server.start_server_thread()
         self.zeroconf.register_service(self.info)
 
     def stop(self):
         self.zeroconf.unregister_service(self.info)
         self.zeroconf.close()
-        self.server.shutdown()
-
-
-if __name__ == "__main__":
-    print("Start ZeroConf Server")
-    za = Zeroauth()
-    za.start()
-    try:
-        while True:
-            sleep(0.1)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("Stop ZeroConf Server")
-        za.stop()
+        self.server.stop_server_thread()

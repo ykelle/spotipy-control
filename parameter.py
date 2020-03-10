@@ -8,11 +8,11 @@ SPOTIFY_AP_FALLBACK = ('ap.spotify.com', 80)
 
 
 SPOTIFY_API_VERSION=      0x10800000000
-INFORMATION_STRING=       "pyspotify2"
+INFORMATION_STRING=       "pyspotify"
 
 DEVICE_ID=                "452198fd329622876e14907634264e6f332e5423"
-VERSION_STRING=           "pyspotify2-0.1"
-REMOTE_NAME = "Spotipy"
+VERSION_STRING=           "2.1.0"
+REMOTE_NAME_DEFAULT = "Spotipy"
 
 
 LOGIN_REQUEST_COMMAND=        0xAB
@@ -52,7 +52,6 @@ DEFAULT_SCOPE = ','.join(["user-read-private",
             "playlist-modify-public",
             "playlist-modify-private"])
 
-CLIENT_ID = '' # TODO: Set over parameter
 AUTH_TOKEN_TEMPLATE = 'hm://keymaster/token/authenticated?client_id={clientId}&scope={scope}'
 
 ALBUM_GID=  ''

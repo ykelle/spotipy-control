@@ -4,39 +4,34 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 import json
-
 from google.protobuf import text_format
-
-import decrypt
+from blob import Blob
 import base64
 from diffiehellman import diffiehellman as dh
-from authtoken import AuthToken
-from connection import Connection
-from mercury import MercuryManager
 from parameter import *
-from session import Session
+from time import sleep
 
 # patch DH with non RFC prime to be used for handshake
 if not 1 in dh.PRIMES:
-  dh.PRIMES.update( { 1: {
-      "prime": 0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a63a3620ffffffffffffffff,
-      "generator": 2
-  } } )
+    dh.PRIMES.update({1: {
+        "prime": 0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a63a3620ffffffffffffffff,
+        "generator": 2
+    }})
 
-class Server(BaseHTTPRequestHandler):
-    '''
-    dh = deffHell.DiffieHellman(group=1)
-    privateKey = dh.get_private_key()
-    publicKey = dh.gen_public_key()
-    '''
+
+class RequestHandler(BaseHTTPRequestHandler):
+    '''Static keys'''
     keys = dh.DiffieHellman(group=1, key_length=KEY_LENGTH)
     keys.generate_private_key()
     keys.generate_public_key()
     publicKey = keys.public_key
 
+    def __init__(self, request, client_address, server) -> None:
+        super().__init__(request, client_address, server)
+
     def _set_200_headers(self, keyword, value):
         self.send_response(200)
-        #self.send_header('Content-type', 'application/json')
+        # self.send_header('Content-type', 'application/json')
         self.send_header(keyword, value)
         self.end_headers()
 
@@ -53,7 +48,7 @@ class Server(BaseHTTPRequestHandler):
         key_byte_array = self.publicKey.to_bytes((self.publicKey.bit_length() + 7) // 8, 'big')
         b64_key = base64.standard_b64encode(key_byte_array).decode()
 
-        if (request_path == "/spotzc") and (query == "action=getInfo"):
+        if (request_path == "/spotzc") and (query == "action=getInfo" or query == "action=getInfo&version=2.7.1"):
             self._set_200_headers('Content-type', 'application/json')
             self.wfile.write(json.dumps(
                 {
@@ -62,7 +57,7 @@ class Server(BaseHTTPRequestHandler):
                     "spotifyError": 0,
                     "version": VERSION_STRING,
                     "deviceID": DEVICE_ID,
-                    "remoteName": REMOTE_NAME,
+                    "remoteName": REMOTE_NAME_DEFAULT,
                     "activeUser": "",
                     "publicKey": b64_key,
                     "deviceType": "SPEAKER",
@@ -89,7 +84,7 @@ class Server(BaseHTTPRequestHandler):
             return
 
         user_name = var['userName'][0].encode()
-        blob = var['blob'][0].encode()
+        blob_bytes = var['blob'][0].encode()
         client_key = var['clientKey'][0].encode()
         device_name = var['deviceName'][0]
 
@@ -103,13 +98,16 @@ class Server(BaseHTTPRequestHandler):
         self._set_200_headers('Content-Length', str(len(response)))
         self.wfile.write(response)
 
-        blob_dec = decrypt.getBlobFromAuth(Server.keys, blob, client_key)
-        login = decrypt.decryptBlob(blob_dec, user_name, DEVICE_ID)
+        blob = Blob()
+        login = blob.decrypt(self.keys, blob_bytes, client_key, user_name, DEVICE_ID)
+
+        self.server.notify_listener(blob)
 
         with open('credentials/' + device_name + '.dat', 'w') as f:
             f.write(text_format.MessageToString(login))
             f.close()
 
+        '''
         connection = Connection()
         session = Session().connect(connection)
         reusable_token = session.authenticate(login)
@@ -118,37 +116,61 @@ class Server(BaseHTTPRequestHandler):
         authToken = AuthToken(manager)
         print("AuthToken: ", authToken)
         manager.terminate()
+        '''
 
 
+class MyHttpServer(HTTPServer):
 
-class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    """ This class allows to handle requests in separated threads.
-        No further content needed, don't touch this. """
+    def __init__(self, server_address, RequestHandlerClass):
+        self.listener = None
+        super().__init__(server_address, RequestHandlerClass)
 
+    def notify_listener(self, blob):
+        if self.listener is not None:
+            self.listener.new_blob_status(blob)
 
-def run(server_class=HTTPServer, handler_class=Server, port=8200):
-    server_address = ('', port)
-    httpd = server_class(server_address, handler_class)
-
-    print('Starting httpd on port %d...' % port)
-    httpd.serve_forever()
-
-
-def start_thread(port=None):
-    if port is None:
-        port = random_port()
-
-    server_address = ('', port)
-    server = ThreadedHTTPServer(server_address, Server)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.deamon = False
-    thread.start()
-    print("---Server started (Port %d) ---" % port)
-    return server
+    def register_listener(self, listener):
+        self.listener = listener
 
 
-def random_port():
+class HTTPServerController:
+
+    def __init__(self, port):
+        self.port = port
+        self.server_address = ('', port)
+        self.httpServer = MyHttpServer(self.server_address, RequestHandler)
+        self.register_listener = self.httpServer.register_listener
+
+    def start_server_thread(self):
+        thread = threading.Thread(target=self.httpServer.serve_forever)
+        thread.deamon = False
+        thread.start()
+        print("---Server started (Port %d) ---" % self.port)
+        return self.httpServer
+
+    def stop_server_thread(self):
+        self.httpServer.shutdown()
+
+
+def get_random_port():
     min = 1024
     max = 65536
     randPort = random.randint(min, max)
     return randPort
+
+
+if __name__ == "__main__":
+    print("Start Webserver")
+    random_port = get_random_port()
+    server_controller = HTTPServerController(random_port)
+    server_controller.start_server_thread()
+    print("Started Webserver")
+
+    try:
+        while True:
+            sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server_controller.stop_server_thread()
+        print("Stop Webserver")
